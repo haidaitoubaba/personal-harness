@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -68,10 +67,10 @@ class HarnessCLITests(unittest.TestCase):
         self.folder = Path(folder.name)
         self.db = self.folder / "run state.sqlite3"
 
-    def cli(self, *args, code=0, env=None):
+    def cli(self, *args, code=0):
         process = subprocess.run(
             [sys.executable, "-m", "harness", "--db", str(self.db), *map(str, args)],
-            cwd=ROOT, env=env, capture_output=True, text=True, timeout=10, check=False,
+            cwd=ROOT, capture_output=True, text=True, timeout=10, check=False,
         )
         self.assertEqual(process.returncode, code, process.stderr + process.stdout)
         if args[0] == "events":
@@ -210,22 +209,37 @@ Runner(Store(Path(sys.argv[1])), {"mock": Interrupted()}).resume(sys.argv[2], {"
         self.assertEqual(failure["details"]["exit_code"], 14)
 
     def test_timeout_retries_and_kills_child_processes(self):
+        launched = self.folder / "launched"
         marker = self.folder / "escaped"
-        child = "from pathlib import Path; import sys, time; time.sleep(1); Path(sys.argv[1]).touch()"
+        child = (
+            "from pathlib import Path; import sys, time; Path(sys.argv[1]).touch(); "
+            "time.sleep(2); Path(sys.argv[2]).touch()"
+        )
         parent = "import subprocess, sys, time; subprocess.Popen(sys.argv[1:]); time.sleep(10)"
         run = self.begin(self.definition(mock_action(
             adapter="command",
-            config={"argv": [sys.executable, "-c", parent, sys.executable, "-c", child, str(marker)]},
-            timeout_seconds=0.3,
+            config={"argv": [
+                sys.executable, "-c", parent, sys.executable, "-c", child, str(launched), str(marker),
+            ]},
+            timeout_seconds=0.9,
             max_attempts=2,
         )))
         started = time.monotonic()
         report = self.cli("resume", run, "--allow-command", code=1)
-        self.assertLess(time.monotonic() - started, 5)
+        self.assertLess(time.monotonic() - started, 7)
         self.assertEqual(report["steps"][0]["attempts"], 2)
         self.assertEqual(report["steps"][0]["reason"], "timeout")
-        time.sleep(1)
+        self.assertTrue(launched.exists())
+        time.sleep(2)
         self.assertFalse(marker.exists())
+
+    def test_command_limits_captured_output(self):
+        run = self.begin(self.definition(mock_action(
+            adapter="command",
+            config={"argv": [sys.executable, "-c", "import sys; sys.stdout.write('a' * 300000)"]},
+        )))
+        report = self.cli("resume", run, "--allow-command", code=1)
+        self.assertEqual(report["steps"][0]["reason"], "process_output_too_large")
 
     def test_command_runs_in_work_directory_and_receives_selected_inputs(self):
         script = "import json, sys; from pathlib import Path; print(Path.cwd().name, json.load(sys.stdin))"
@@ -243,10 +257,9 @@ Runner(Store(Path(sys.argv[1])), {"mock": Interrupted()}).resume(sys.argv[2], {"
         self.assertEqual(output.strip(), f"{self.folder.name} {{'source': {{'ok': True}}}}")
 
     def test_codex_subprocess_contract_with_local_fake(self):
-        fake = self.folder / "codex"
+        fake = self.folder / "fake_codex.py"
         fake.write_text(
-            f"#!{sys.executable}\n"
-            + """
+            """
 import json
 import sys
 from pathlib import Path
@@ -272,12 +285,26 @@ target.write_text(json.dumps({
 """,
             encoding="utf-8",
         )
-        fake.chmod(0o755)
-        env = os.environ | {"PATH": f"{self.folder}{os.pathsep}{os.environ.get('PATH', '')}"}
         run = self.begin(CODEX)
-        self.assertIn("--allow-codex", self.cli("resume", run, env=env, code=2))
+        self.assertIn("--allow-codex", self.cli("resume", run, code=2))
         self.assertEqual(self.cli("status", run)["steps"][1]["attempts"], 0)
-        report = self.cli("resume", run, "--allow-codex", env=env)
+        script = """
+import sys
+from harness import __main__ as cli
+from harness.adapters import CodexAdapter, built_in_adapters
+
+cli.built_in_adapters = lambda: built_in_adapters() | {
+    "codex": CodexAdapter([sys.executable, sys.argv[1]])
+}
+raise SystemExit(cli.main(sys.argv[2:]))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(fake), "--db", str(self.db),
+             "resume", run, "--allow-codex"],
+            cwd=ROOT, capture_output=True, text=True, timeout=10, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        report = json.loads(result.stdout)
         self.assertEqual(report["status"], "waiting_for_approval")
         draft = self.cli("status", run, "--outputs")["steps"][1]["output"]
         self.assertEqual(draft["summary"], "Summary from fake Codex")

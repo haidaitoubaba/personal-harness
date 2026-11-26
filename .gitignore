@@ -1,5 +1,6 @@
 .harness/
 .cache/
 .ruff_cache/
+dist/
 __pycache__/
 *.py[cod]

@@ -7,6 +7,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from .workflow import (
@@ -27,6 +28,11 @@ def run_process(
     argv: list[str], cwd: Path, timeout: float, input_bytes: bytes = b"",
 ) -> bytes:
     """Bound captured stdout and stop the subprocess group on failure or interruption."""
+    if os.name == "nt":
+        from .windows_process import run_windows_process
+
+        return run_windows_process(argv, cwd, timeout, input_bytes)
+
     deadline = time.monotonic() + timeout
     with tempfile.TemporaryFile() as input_file:
         input_file.write(input_bytes)
@@ -111,8 +117,8 @@ class CommandAdapter:
 
 
 class CodexAdapter:
-    def __init__(self, executable: str = "codex"):
-        self.executable = executable
+    def __init__(self, executable: str | Sequence[str] = "codex"):
+        self.command = [executable] if isinstance(executable, str) else list(executable)
 
     def check(self, config: JsonObject, location: str) -> None:
         object_with(config, location, {"prompt"})
@@ -130,7 +136,7 @@ class CodexAdapter:
             final_message = root / "final.json"
             run_process(
                 [
-                    self.executable, "exec", "--ignore-user-config", "--ephemeral",
+                    *self.command, "exec", "--ignore-user-config", "--ephemeral",
                     "--skip-git-repo-check", "--sandbox", "read-only",
                     "--disable", "apps", "--disable", "plugins", "--disable", "hooks",
                     "--disable", "browser_use", "--disable", "computer_use",

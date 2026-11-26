@@ -1,0 +1,42 @@
+PERSONAL HARNESS
+Quick start for lab colleagues
+
+1. Extract the entire ZIP into a folder you can write to.
+2. Open "Start Harness.command" on a Mac, or "Start Harness.cmd" on Windows.
+3. Press Enter to try the offline research briefing. The program uses sample notes
+   and pauses for your decision. It stores the result in the local .harness folder.
+
+Python is included. The Mac package contains both Apple silicon and Intel code.
+The Windows package is for 64-bit Intel or AMD Windows computers.
+
+Run your own workflows
+
+Use a terminal from the project where you want to keep the run records. Call
+the "harness" launcher on macOS or "harness.cmd" on Windows by its full path.
+Below, HARNESS means that launcher, and EXAMPLE means the full path to
+examples/research-briefing.json inside the extracted package.
+
+  HARNESS validate EXAMPLE
+  HARNESS start EXAMPLE
+  HARNESS resume RUN_ID
+  HARNESS status RUN_ID --outputs
+  HARNESS approve RUN_ID review_briefing
+  HARNESS events RUN_ID
+
+Use the run ID printed by "start". Run future commands from the same directory
+or pass the same --db path before the command. Use "HARNESS --help" for the
+command list. Your local .harness database stores definitions and outputs.
+
+Workflow examples
+
+- research-briefing.json runs offline with sample data.
+- research-briefing-codex.json requires a separately installed and signed-in
+  Codex CLI. "resume --allow-codex" sends the prompt and selected step outputs
+  to Codex.
+- software-ci.json is a template. Set its command and workspace for the target
+  project's tests. "resume --allow-command" runs that command with your local
+  permissions. Install any tools the project's test command requires.
+
+This package uses no custom installer. The macOS binary is signed ad hoc for
+local use. The Harness distribution has no publisher signature on either platform.
+Follow your institution's software policies when opening the bundle.

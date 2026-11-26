@@ -4,7 +4,7 @@ A local Python runner for workflows that need retries, durable progress, and a h
 
 ## Run a briefing
 
-Use Python 3.12 or later on macOS or Linux. Run the commands from the project directory. The core runner uses the Python standard library.
+Use Python 3.12 or later on macOS, Linux, or Windows to run from source. Run these shell examples from the project directory. The core runner uses the Python standard library.
 
 ```sh
 python3 -m harness validate examples/research-briefing.json
@@ -82,3 +82,21 @@ for f in examples/*.json; do python3 -m harness validate "$f" || exit 1; done
 ```
 
 The tests use temporary SQLite databases and a fake Codex executable. See [PLAN.md](PLAN.md) for the verification record.
+
+## Build portable packages for colleagues
+
+The macOS and Windows bundles include a Python runtime, example workflows, the full command-line interface, and a double-click offline demo. Extract the complete ZIP and open the platform's **Start Harness** launcher. See [START-HERE.txt](packaging/START-HERE.txt) for instructions included in each bundle.
+
+On a Mac, run the builder with a universal2 Python and PyInstaller 6.22.3 installed in its build environment.
+
+```sh
+python3 packaging/build.py macos --output-dir dist
+```
+
+To build the Windows x64 ZIP on any platform, download the official Python 3.14.7 Windows x64 embeddable archive. The builder checks its pinned SHA-256 before extracting it.
+
+```sh
+python3 packaging/build.py windows --output-dir dist --python-embed python-3.14.7-embed-amd64.zip
+```
+
+The packaged offline demo runs without Codex. Codex workflows require a separate Codex CLI installation and sign-in. Application data and workflow outputs are stored locally in SQLite.

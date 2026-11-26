@@ -1,6 +1,6 @@
 """SQLite state and per-run locking."""
 
-import fcntl
+import errno
 import json
 import os
 import re
@@ -12,6 +12,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .workflow import JsonObject, Workflow, WorkflowError, json_text
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -72,11 +77,16 @@ class Store:
         self.run(run_id)
         directory = self.path.with_name(self.path.name + ".locks")
         directory.mkdir(mode=0o700, exist_ok=True)
-        fd = os.open(directory / run_id, os.O_CREAT | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "wb") as lock:
+        fd = os.open(directory / run_id, os.O_CREAT | os.O_RDWR, 0o600)
+        with os.fdopen(fd, "r+b") as lock:
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
                 raise WorkflowError(f"Run {run_id} is already being advanced") from error
             yield
 

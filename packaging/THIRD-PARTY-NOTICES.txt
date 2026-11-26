@@ -1,0 +1,6 @@
+The portable runtime includes CPython from the Python Software Foundation.
+CPython's license and bundled component notices are in runtime/LICENSE.txt on
+Windows and licenses/Python-LICENSE.txt on macOS.
+
+The macOS executable is bundled with PyInstaller. Its copying terms, including
+the bootloader exception, are in licenses/PyInstaller-COPYING.txt.
