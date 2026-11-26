@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "name": "Daily research briefing",
+  "steps": [
+    {
+      "id": "collect_notes",
+      "type": "action",
+      "adapter": "mock",
+      "config": {
+        "outcomes": [
+          {"fail": true},
+          {"output": {"notes": [{"id": "sample-1", "text": "The team finished checking the sample metadata. A methods discussion is planned tomorrow."}]}}
+        ]
+      },
+      "max_attempts": 2,
+      "validate": {"types": {"notes": "array"}, "nonempty": ["notes"]}
+    },
+    {
+      "id": "draft_briefing",
+      "type": "action",
+      "adapter": "mock",
+      "config": {
+        "outcomes": [
+          {"output": {
+            "summary": "Sample metadata review is complete.",
+            "next_actions": ["Prepare questions for tomorrow's methods discussion."],
+            "sources": ["sample-1"]
+          }}
+        ]
+      },
+      "from_steps": ["collect_notes"],
+      "validate": {
+        "types": {"summary": "string", "next_actions": "array"},
+        "equals": {"sources": ["sample-1"]},
+        "nonempty": ["summary", "next_actions"]
+      }
+    },
+    {
+      "id": "review_briefing",
+      "type": "approval",
+      "message": "Inspect the persisted draft and source IDs before finishing the briefing."
+    }
+  ]
+}

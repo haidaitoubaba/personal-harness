@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "Daily research briefing with Codex",
+  "steps": [
+    {
+      "id": "collect_notes",
+      "type": "action",
+      "adapter": "mock",
+      "config": {
+        "outcomes": [
+          {"output": {"notes": [{"id": "sample-1", "text": "The team finished checking the sample metadata. A methods discussion is planned tomorrow."}]}}
+        ]
+      },
+      "validate": {"types": {"notes": "array"}, "nonempty": ["notes"]}
+    },
+    {
+      "id": "draft_briefing",
+      "type": "action",
+      "adapter": "codex",
+      "config": {
+        "prompt": "Write a short daily research briefing from the supplied notes. Return a summary string, an array next_actions containing one concrete action, and an array sources containing the note ID. Use the supplied note only."
+      },
+      "from_steps": ["collect_notes"],
+      "timeout_seconds": 90,
+      "max_attempts": 2,
+      "validate": {
+        "types": {"summary": "string", "next_actions": "array"},
+        "equals": {"sources": ["sample-1"]},
+        "nonempty": ["summary", "next_actions"]
+      }
+    },
+    {
+      "id": "review_briefing",
+      "type": "approval",
+      "message": "Review the draft against the stored note before finishing the briefing."
+    }
+  ]
+}

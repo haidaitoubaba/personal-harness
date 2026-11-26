@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "name": "Software CI review",
+  "steps": [
+    {
+      "id": "run_tests",
+      "type": "action",
+      "adapter": "command",
+      "config": {"argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]},
+      "timeout_seconds": 60,
+      "validate": {"equals": {"exit_code": 0}}
+    },
+    {
+      "id": "review_results",
+      "type": "approval",
+      "message": "The local tests passed. Review the result before closing this CI check."
+    },
+    {
+      "id": "close_check",
+      "type": "action",
+      "adapter": "mock",
+      "config": {"outcomes": [{"output": {"conclusion": "tests passed and review approved"}}]},
+      "validate": {"nonempty": ["conclusion"]}
+    }
+  ]
+}
