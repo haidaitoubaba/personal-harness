@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "Personal Harness package build and regression checks",
+  "steps": [
+    {
+      "id": "source_regressions",
+      "type": "action",
+      "adapter": "command",
+      "config": {"argv": ["python3.14", "-B", "packaging/check_packages.py", "test"]},
+      "timeout_seconds": 120,
+      "validate": {"equals": {"exit_code": 0}, "nonempty": ["stdout"]}
+    },
+    {
+      "id": "build_packages",
+      "type": "action",
+      "adapter": "command",
+      "config": {"argv": ["python3.14", "-B", "packaging/check_packages.py", "build"]},
+      "timeout_seconds": 300,
+      "validate": {"equals": {"exit_code": 0}, "nonempty": ["stdout"]}
+    },
+    {
+      "id": "verify_packages",
+      "type": "action",
+      "adapter": "command",
+      "config": {"argv": ["python3.14", "-B", "packaging/check_packages.py", "verify"]},
+      "from_steps": ["build_packages"],
+      "timeout_seconds": 180,
+      "validate": {"equals": {"exit_code": 0}, "nonempty": ["stdout"]}
+    }
+  ]
+}

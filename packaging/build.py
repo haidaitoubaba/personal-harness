@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,9 @@ import zipfile
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
-WINDOWS_RUNTIME_SHA256 = "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
+PYTHON_VERSION = "3.14.10"
+PYTHON_RUNTIME_NAME = "python" + "".join(PYTHON_VERSION.split(".")[:2])
+WINDOWS_RUNTIME_SHA256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"
 BUNDLE_NAME = "Personal Harness"
 MAP = {"windows": "Personal-Harness-Windows-x64.zip", "macos": "Personal-Harness-macOS.zip"}
 
@@ -33,11 +36,11 @@ def archive_windows(bundle: Path, embed: Path, output: Path) -> None:
     with embed.open("rb") as archive:
         actual = hashlib.file_digest(archive, "sha256").hexdigest()
     if actual != WINDOWS_RUNTIME_SHA256:
-        raise SystemExit("Windows Python archive does not match the approved 3.14.7 AMD64 checksum.")
+        raise SystemExit(f"Windows Python archive does not match the approved {PYTHON_VERSION} AMD64 checksum.")
     runtime = bundle / "runtime"
     with zipfile.ZipFile(embed) as archive:
         archive.extractall(runtime)
-    (runtime / "python314._pth").write_text("python314.zip\n.\n..\n", encoding="ascii")
+    (runtime / f"{PYTHON_RUNTIME_NAME}._pth").write_text(f"{PYTHON_RUNTIME_NAME}.zip\n.\n..\n", encoding="ascii")
     shutil.copytree(PROJECT / "harness", bundle / "harness", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(PROJECT / "packaging" / "launcher.py", bundle / "launch.py")
     write_launcher(bundle / "harness.cmd", '\n'.join([
@@ -67,6 +70,8 @@ def archive_windows(bundle: Path, embed: Path, output: Path) -> None:
 def archive_macos(bundle: Path, output: Path) -> None:
     if sys.platform != "darwin":
         raise SystemExit("The macOS bundle requires a macOS Python and PyInstaller.")
+    if platform.python_version() != PYTHON_VERSION:
+        raise SystemExit(f"The macOS bundle requires Python {PYTHON_VERSION} (universal2).")
     import PyInstaller
 
     staging = bundle.parent

@@ -87,16 +87,29 @@ The tests use temporary SQLite databases and a fake Codex executable. See [PLAN.
 
 The macOS and Windows bundles include a Python runtime, example workflows, the full command-line interface, and a double-click offline demo. Extract the complete ZIP and open the platform's **Start Harness** launcher. See [START-HERE.txt](packaging/START-HERE.txt) for instructions included in each bundle.
 
-On a Mac, run the builder with a universal2 Python and PyInstaller 6.22.3 installed in its build environment.
+On a Mac, run the builder with Python 3.14.10 (universal2) and PyInstaller 6.22.3 installed in its build environment.
 
 ```sh
-python3 packaging/build.py macos --output-dir dist
+python3.14 packaging/build.py macos --output-dir dist
 ```
 
-To build the Windows x64 ZIP on any platform, download the official Python 3.14.7 Windows x64 embeddable archive. The builder checks its pinned SHA-256 before extracting it.
+To build the Windows x64 ZIP on any platform, download the official Python 3.14.10 Windows x64 embeddable archive. The builder checks its pinned SHA-256 before extracting it.
 
 ```sh
-python3 packaging/build.py windows --output-dir dist --python-embed python-3.14.7-embed-amd64.zip
+python3 packaging/build.py windows --output-dir dist --python-embed python-3.14.10-embed-amd64.zip
 ```
 
 The packaged offline demo runs without Codex. Codex workflows require a separate Codex CLI installation and sign-in. Application data and workflow outputs are stored locally in SQLite.
+
+### Repeat the builds and checks with Personal Harness
+
+From the repository root on macOS, use an environment where `python3.14` is the universal2 Python 3.14.10 with PyInstaller 6.22.3 installed. Place the official `python-3.14.10-embed-amd64.zip` in `dist/`. Set `HARNESS_BUILD_DIR` to use a different directory for both the input ZIP and build outputs.
+
+```sh
+python3.14 -m harness validate packaging/package-check.json
+RUN_ID=$(python3.14 -m harness start packaging/package-check.json --workspace "$PWD" | python3.14 -c 'import json, sys; print(json.load(sys.stdin)["run_id"])')
+python3.14 -m harness resume "$RUN_ID" --allow-command
+python3.14 -m harness status "$RUN_ID" --outputs
+```
+
+Each successful build writes both ZIPs to a fresh `personal-harness-*` directory. The run records source tests, SHA-256 digests, the packaged macOS demo and CLI checks, and Windows runtime and ZIP verification. Run `Start Harness.cmd` from an extracted ZIP on native Windows to complete the Windows execution check.
