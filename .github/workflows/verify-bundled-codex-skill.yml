@@ -1,0 +1,111 @@
+name: Verify bundled Codex setup
+
+on:
+  push:
+    branches: [ci/verify-bundled-codex-skill]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 bundled Skill
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build the Windows package and run the setup command
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          import platform
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          def require(condition, message):
+              if not condition:
+                  raise RuntimeError(message)
+
+          require(platform.system() == 'Windows' and platform.machine().lower() == 'amd64', 'Expected Windows x64')
+          output = Path('dist').resolve()
+          with tempfile.TemporaryDirectory(prefix='Harness setup ', dir=os.environ['RUNNER_TEMP']) as folder:
+              root = Path(folder)
+              runtime = root / 'python-3.14.10-embed-amd64.zip'
+              url = 'https://www.python.org/ftp/python/3.14.10/' + runtime.name
+              with urllib.request.urlopen(url, timeout=90) as response, runtime.open('wb') as target:
+                  shutil.copyfileobj(response, target)
+              subprocess.run([sys.executable, '-B', 'packaging/build.py', 'windows',
+                              '--output-dir', output, '--python-embed', runtime], check=True, timeout=90)
+              archive = output / 'Personal-Harness-Windows-x64.zip'
+              with archive.open('rb') as stream:
+                  print('Tested ZIP SHA-256:', hashlib.file_digest(stream, 'sha256').hexdigest(), flush=True)
+              with zipfile.ZipFile(archive) as package:
+                  require(package.testzip() is None, 'Invalid ZIP')
+                  package.extractall(root)
+              bundle = root / 'Personal Harness'
+              new_project = root / 'Another project'
+              new_project.mkdir()
+              cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
+
+              def run(args, cwd, expected=0):
+                  result = subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                                          encoding='utf-8', errors='replace', timeout=25)
+                  require(result.returncode == expected,
+                          f'{args!r} returned {result.returncode}: {result.stdout}\n{result.stderr}')
+                  return result
+
+              setup = [cmd, '/d', '/c', 'harness.cmd', 'setup-codex']
+              installed = Path.home() / '.agents/skills/personal-harness'
+              require(not installed.exists(), f'The test runner already contains a Personal Harness skill: {installed}')
+              try:
+                  configured = json.loads(run(setup, bundle).stdout)
+                  require(configured['status'] == 'configured' and Path(configured['skill']) == installed.resolve(),
+                          f'Unexpected setup result: {configured}')
+                  require((installed / 'SKILL.md').read_text(encoding='utf-8') ==
+                          (bundle / 'codex-skill/personal-harness/SKILL.md').read_text(encoding='utf-8'),
+                          'Installed skill differs from the bundled file')
+                  bound = Path((installed / 'runner-location.txt').read_text(encoding='utf-8').strip())
+                  require(bound == bundle.resolve(), f'Setup bound the wrong package: {bound}')
+                  require(json.loads(run(setup, bundle).stdout) == configured, 'Second setup did not succeed')
+                  print('Bundled Skill installed to the fresh Windows user directory; repeating setup succeeded.', flush=True)
+
+                  other_skills = root / 'other skills'
+                  custom = other_skills / 'personal-harness/SKILL.md'
+                  custom.parent.mkdir(parents=True)
+                  custom.write_text('Local custom skill', encoding='utf-8')
+                  refused = run([*setup, '--skills-dir', other_skills], bundle, expected=1)
+                  require('A different Personal Harness skill is already installed' in refused.stderr,
+                          'Setup did not identify the existing custom Skill')
+                  require(custom.read_text(encoding='utf-8') == 'Local custom skill' and
+                          not custom.with_name('runner-location.txt').exists(), 'Setup changed the custom Skill')
+                  print('Existing custom Skill preserved.', flush=True)
+
+                  cli = [cmd, '/d', '/c', 'call', str(bound / 'harness.cmd')]
+                  definition = str(bound / 'examples/research-briefing.json')
+                  def invoke(*args):
+                      return json.loads(run([*cli, *args], new_project).stdout)
+
+                  require(invoke('validate', definition)['valid'], 'The bound launcher could not validate the demo')
+                  run_id = invoke('start', definition)['run_id']
+                  require(invoke('resume', run_id)['status'] == 'waiting_for_approval', 'Demo did not reach approval')
+                  require(invoke('approve', run_id, 'review_briefing')['status'] == 'succeeded', 'Demo approval failed')
+                  require((new_project / '.harness/state.sqlite3').is_file(), 'The project run database was not saved')
+                  print('Bound Windows launcher ran the offline demo from a separate project and saved approval.', flush=True)
+              finally:
+                  if installed.exists():
+                      shutil.rmtree(installed)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: personal-harness-windows-tested
+          path: dist/Personal-Harness-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
