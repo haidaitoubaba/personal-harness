@@ -2,6 +2,51 @@
 
 A local Python runner for workflows that need retries, durable progress, and a human review step. A workflow is an ordered JSON file. The same runner can check software, draft a research briefing, or run another workflow built from its adapters.
 
+## Use the packaged release
+
+The v0.1.0 ZIPs include Python 3.14.10. [v0.1.0 release notes](https://github.com/haidaitoubaba/personal-harness/releases/tag/v0.1.0)
+
+### Download and launch
+
+1. Download [Personal-Harness-macOS.zip](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0/Personal-Harness-macOS.zip) for an Apple silicon or Intel Mac, or [Personal-Harness-Windows-x64.zip](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0/Personal-Harness-Windows-x64.zip) for a 64-bit Intel or AMD Windows PC.
+2. Extract the entire ZIP into a writable folder. Open the extracted `Personal Harness` folder and double-click `Start Harness.command` on macOS or `Start Harness.cmd` on Windows.
+3. Press Enter to run the sample research briefing. Read the draft, then type `y` to approve, `n` to reject, or press Enter to leave the review pending.
+
+The demo works offline with sample notes. Results are saved in `.harness/state.sqlite3` inside the extracted folder.
+
+### Run the sample from a terminal
+
+Open Terminal or PowerShell in the extracted `Personal Harness` folder. After `start` prints a run ID, replace `RUN_ID` with that value in the following commands.
+
+**macOS**
+
+```sh
+./harness validate examples/research-briefing.json
+./harness start examples/research-briefing.json
+./harness resume RUN_ID
+./harness status RUN_ID --outputs
+./harness approve RUN_ID review_briefing
+```
+
+**Windows PowerShell**
+
+```powershell
+.\harness.cmd validate examples/research-briefing.json
+.\harness.cmd start examples/research-briefing.json
+.\harness.cmd resume RUN_ID
+.\harness.cmd status RUN_ID --outputs
+.\harness.cmd approve RUN_ID review_briefing
+```
+
+Use `status --outputs` to read the draft before approving. Use `reject RUN_ID review_briefing` instead of `approve` to reject it. Run later commands from the same folder so Harness can find the saved run.
+
+### Run your own workflow
+
+- For a local project check, copy `examples/software-ci.json` and set `config.argv` to your project's test command. Use `start WORKFLOW --workspace PROJECT_FOLDER` to set where it runs, followed by `resume RUN_ID --allow-command`. After approving the review, run `resume RUN_ID` again to finish the example's remaining step.
+- For a Codex briefing, start with `examples/research-briefing-codex.json`. Install and sign in to the Codex CLI separately, then run `resume RUN_ID --allow-codex` to send the example's selected inputs to Codex.
+
+See `START-HERE.txt` in the extracted folder for the launcher and database options.
+
 ## Run a briefing
 
 Use Python 3.12 or later on macOS, Linux, or Windows to run from source. Run these shell examples from the project directory. The core runner uses the Python standard library.
