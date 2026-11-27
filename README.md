@@ -4,19 +4,35 @@ A local Python runner for workflows that need retries, durable progress, and a h
 
 ## Use the packaged release
 
-The v0.1.0 ZIPs include Python 3.14.10. [v0.1.0 release notes](https://github.com/haidaitoubaba/personal-harness/releases/tag/v0.1.0)
+Each v0.1.1 ZIP includes Personal Harness, Python 3.14.10, and the Codex Skill. [v0.1.1 release notes](https://github.com/haidaitoubaba/personal-harness/releases/tag/v0.1.1)
 
-### Download and launch
+### Download and set up in Codex
 
-1. Download [Personal-Harness-macOS.zip](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0/Personal-Harness-macOS.zip) for an Apple silicon or Intel Mac, or [Personal-Harness-Windows-x64.zip](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0/Personal-Harness-Windows-x64.zip) for a 64-bit Intel or AMD Windows PC.
-2. Extract the entire ZIP into a writable folder. Open the extracted `Personal Harness` folder and double-click `Start Harness.command` on macOS or `Start Harness.cmd` on Windows.
-3. Press Enter to run the sample research briefing. Read the draft, then type `y` to approve, `n` to reject, or press Enter to leave the review pending.
+1. Download one ZIP for your computer. [macOS for Apple silicon and Intel](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.1/Personal-Harness-macOS.zip) or [Windows x64](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.1/Personal-Harness-Windows-x64.zip).
+2. Extract the whole ZIP and open the resulting `Personal Harness` folder in Codex.
+3. Say:
 
-The demo works offline with sample notes. Results are saved in `.harness/state.sqlite3` inside the extracted folder.
+   > Set up Personal Harness from this folder using START-HERE.txt.
 
-### Run the sample from a terminal
+Codex uses the included setup command to install the Skill and remember the path to the extracted program. If Codex asks for permission to write to its Skills directory, approve that installation. Keep the extracted folder together and repeat setup if you move it.
 
-Open Terminal or PowerShell in the extracted `Personal Harness` folder. After `start` prints a run ID, replace `RUN_ID` with that value in the following commands.
+### Use Personal Harness in Codex
+
+In a new Codex chat, say:
+
+> Use Personal Harness to run the offline research briefing and wait for my approval.
+
+To run a real project check, open that project in Codex and say:
+
+> Use Personal Harness to run this project's tests and wait for my approval.
+
+The offline demo uses sample notes. Codex workflows that generate a briefing use a separately installed, signed-in Codex CLI.
+
+### Run directly from the desktop or terminal
+
+For the offline demo, double-click `Start Harness.command` on macOS or `Start Harness.cmd` on Windows. Press Enter to start. At review, type `y` to approve, `n` to reject, or press Enter to leave it pending. Results are saved in `.harness/state.sqlite3` inside the extracted folder.
+
+To use a terminal, open it inside the extracted folder. Replace `RUN_ID` with the value printed by `start`.
 
 **macOS**
 
@@ -38,14 +54,9 @@ Open Terminal or PowerShell in the extracted `Personal Harness` folder. After `s
 .\harness.cmd approve RUN_ID review_briefing
 ```
 
-Use `status --outputs` to read the draft before approving. Use `reject RUN_ID review_briefing` instead of `approve` to reject it. Run later commands from the same folder so Harness can find the saved run.
+Use `reject RUN_ID review_briefing` to reject the draft. Run later commands from the same folder to use the same run database.
 
-### Run your own workflow
-
-- For a local project check, copy `examples/software-ci.json` and set `config.argv` to your project's test command. Use `start WORKFLOW --workspace PROJECT_FOLDER` to set where it runs, followed by `resume RUN_ID --allow-command`. After approving the review, run `resume RUN_ID` again to finish the example's remaining step.
-- For a Codex briefing, start with `examples/research-briefing-codex.json`. Install and sign in to the Codex CLI separately, then run `resume RUN_ID --allow-codex` to send the example's selected inputs to Codex.
-
-See `START-HERE.txt` in the extracted folder for the launcher and database options.
+For a project check, copy `examples/software-ci.json`, set `config.argv` to the test command, start the workflow with `--workspace` set to the project, and use `resume RUN_ID --allow-command`. After approval, resume again to finish the example's last step. For a Codex briefing, start with `examples/research-briefing-codex.json` and use `resume RUN_ID --allow-codex` to send the selected inputs to Codex. See `START-HERE.txt` in the extracted folder for launcher and database options.
 
 ## Run a briefing
 
@@ -161,7 +172,7 @@ Each successful build writes both ZIPs to a fresh `personal-harness-*` directory
 
 ## Verify published packages
 
-For the next packaged release, create a new `release/<version>` branch from `release/v0.1.0`, the current packaging baseline. Tag the prepared release commit on the new branch. For later versions, start from the most recent release branch with the packaging files and keep `.github/workflows/verify-published-packages.yml` in the tagged commit.
+For the next packaged release, create a new `release/<version>` branch from `release/v0.1.1`, the current packaging baseline. Tag the prepared release commit on the new branch. For later versions, start from the most recent release branch with the packaging files and keep `.github/workflows/verify-published-packages.yml` in the tagged commit.
 
 Attach `Personal-Harness-macOS.zip` and `Personal-Harness-Windows-x64.zip` to the GitHub Release, then publish it. Publishing a release or prerelease starts the checks for that tag. The Windows x64 and Intel Mac jobs download the published ZIPs, verify their SHA-256 digests, run the offline demo, and check that CLI approval and rejection results are saved and can be read back.
 
