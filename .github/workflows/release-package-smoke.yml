@@ -91,7 +91,7 @@ jobs:
               if WINDOWS:
                   with zipfile.ZipFile(archive) as package:
                       package.extractall(root)
-                  system = Path(env["SystemRoot"])
+                  system = Path(os.environ["SystemRoot"])
                   env["PATH"] = os.pathsep.join(map(str, [system / "System32", system]))
                   cmd = system / "System32/cmd.exe"
               else:
