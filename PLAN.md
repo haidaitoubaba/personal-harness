@@ -12,17 +12,23 @@ Build a local Python runner that can run the same workflow mechanics for softwar
 
 The first version uses the Python standard library on macOS and Linux. Run with the CLI on demand. A scheduler, parallel steps, shared users, publication, and hosted deployment are outside this MVP.
 
-## Verification record
+## Initial verification record
 
 - All 14 tests passed on Python 3.12 on macOS. The suite exercised an abrupt process exit, persisted recovery, and a subprocess timeout with a child process.
 - Both offline examples reached approval and completed successfully. All three JSON workflow definitions passed validation.
 - The Codex adapter passed an end-to-end check with a local fake executable. The installed CLI accepted the adapter's flags in a help invocation. Live Codex inference remains unverified.
 - The code is prepared for GitHub-only source hosting. The verification commands in the README run locally.
 
-## Portable packages
+## Portable packages for v0.1.0-alpha.1
 
 - [x] Add Windows per-run locking and Windows process-tree cleanup while preserving the existing POSIX execution path.
 - [x] Package Python 3.14.7, the CLI, sample workflows, a guided launcher, and license notices for macOS universal2 and Windows x64.
 - [x] Pass 15 source tests on Apple silicon and run the extracted macOS package with an isolated PATH. Validate, resume, approve, and run a local command through the packaged CLI. Verify both architecture slices in the Mac binaries.
 - [x] Verify the Windows ZIP, official runtime checksum, x64 executable headers, embedded SQLite, and launcher and workflow files.
 - [ ] Run the Windows bundle on a native Windows host and exercise the Windows lock and process-cleanup paths there. Intel Mac execution also remains unverified.
+
+## v0.1.0 verification
+
+- The tested macOS universal2 and Windows x64 ZIPs bundle Python 3.14.10. The offline demo and CLI approval and rejection flows passed on Windows x64 and Intel Mac. The macOS package also passed on Apple silicon. [Packaged workflow checks](https://github.com/haidaitoubaba/personal-harness/actions/runs/45927714483)
+- On Apple silicon, the packaged macOS CLI used a signed-in Codex CLI to draft a briefing from the bundled synthetic example. The response passed the output checks and reached the review step.
+- On Windows Server 2025 x64, a packaged external command timed out at the configured limit. Its parent, child and grandchild all exited, the run saved the timeout, and a subsequent command succeeded. [Windows timeout and cleanup check](https://github.com/haidaitoubaba/personal-harness/actions/runs/45932514648)

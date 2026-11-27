@@ -116,7 +116,7 @@ Each successful build writes both ZIPs to a fresh `personal-harness-*` directory
 
 ## Verify published packages
 
-For the next packaged release, create a new `release/<version>` branch from `release/v0.1.0-alpha.2`, the current packaging baseline. Tag the prepared release commit on the new branch. For later versions, start from the most recent release branch with the packaging files and keep `.github/workflows/verify-published-packages.yml` in the tagged commit.
+For the next packaged release, create a new `release/<version>` branch from `release/v0.1.0`, the current packaging baseline. Tag the prepared release commit on the new branch. For later versions, start from the most recent release branch with the packaging files and keep `.github/workflows/verify-published-packages.yml` in the tagged commit.
 
 Attach `Personal-Harness-macOS.zip` and `Personal-Harness-Windows-x64.zip` to the GitHub Release, then publish it. Publishing a release or prerelease starts the checks for that tag. The Windows x64 and Intel Mac jobs download the published ZIPs, verify their SHA-256 digests, run the offline demo, and check that CLI approval and rejection results are saved and can be read back.
 
