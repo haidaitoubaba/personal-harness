@@ -5,6 +5,7 @@ from pathlib import Path
 
 from harness.__main__ import main
 from harness.adapters import built_in_adapters
+from harness.codex_setup import setup_codex
 from harness.runner import Runner
 from harness.store import Store
 from harness.workflow import parse_workflow
@@ -38,9 +39,10 @@ def guided_demo(bundle: Path) -> int:
 
 
 if __name__ == "__main__":
+    folder = (Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False)
+              else Path(__file__).resolve().parent)
     if sys.argv[1:] == ["--guided-demo"]:
-        folder = Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False) else (
-            Path(__file__).resolve().parent
-        )
         raise SystemExit(guided_demo(folder))
+    if sys.argv[1:2] == ["setup-codex"]:
+        raise SystemExit(setup_codex(folder, sys.argv[2:]))
     raise SystemExit(main())

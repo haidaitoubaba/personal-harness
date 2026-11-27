@@ -1,6 +1,22 @@
 PERSONAL HARNESS
-Quick start for lab colleagues
+Set up in Codex
 
+1. Extract the entire ZIP into a folder you can write to.
+2. Open the extracted Personal Harness folder in Codex and say:
+
+   Set up Personal Harness from this folder using START-HERE.txt.
+
+Codex runs the packaged setup command from this folder:
+
+  macOS:   ./harness setup-codex
+  Windows: .\harness.cmd setup-codex
+
+The command installs the bundled Skill and records this program's path. Keep
+the extracted folder together. Run setup again if you move it. In a new Codex
+chat, say: Use Personal Harness to run the offline briefing and wait for my
+approval.
+
+Try the offline demo directly
 1. Extract the entire ZIP into a folder you can write to.
 2. Open "Start Harness.command" on a Mac, or "Start Harness.cmd" on Windows.
 3. Press Enter to try the offline research briefing. The program uses sample notes

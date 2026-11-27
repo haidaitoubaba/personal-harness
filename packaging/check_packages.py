@@ -51,7 +51,7 @@ def build_packages(build_root: Path) -> Path:
 
 def verify_macos(archive: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="Harness package check ") as folder:
-        workspace = Path(folder)
+        workspace = Path(folder).resolve()
         subprocess.run(["/usr/bin/ditto", "-xk", archive, workspace], check=True)
         bundle = workspace / BUNDLE_NAME
         runtime = bundle / "runtime"
@@ -80,6 +80,17 @@ def verify_macos(archive: Path) -> None:
             return json.loads(subprocess.check_output([bundle / "harness", *args], cwd=workspace,
                                                       env=env, text=True))
 
+        skills = workspace / ".agents/skills"
+        configured = invoke("setup-codex", "--skills-dir", skills)
+        installed = skills / "personal-harness"
+        require(configured["status"] == "configured" and Path(configured["skill"]) == installed,
+                "The packaged Codex setup did not install the skill.")
+        require((installed / "SKILL.md").read_bytes() ==
+                (bundle / "codex-skill/personal-harness/SKILL.md").read_bytes(), "The installed skill differs from the ZIP.")
+        require(Path((installed / "runner-location.txt").read_text(encoding="utf-8").strip()) == bundle,
+                "The packaged Codex setup saved the wrong runner path.")
+        require(invoke("setup-codex", "--skills-dir", skills) == configured, "Repeating Codex setup failed.")
+
         workflow = bundle / "examples/research-briefing.json"
         require(invoke("validate", workflow)["valid"], "The packaged CLI rejected the sample workflow.")
         run_id = invoke("start", workflow)["run_id"]
@@ -97,7 +108,7 @@ def verify_macos(archive: Path) -> None:
         require(invoke("resume", run_id, "--allow-command")["status"] == "succeeded", "Packaged command failed.")
         result = invoke("status", run_id, "--outputs")
         require(result["steps"][0]["output"]["stdout"] == "works\n", "Packaged command output differed.")
-        print(f"macOS Python {PYTHON_VERSION}, {binaries} universal2 binaries, CLI and offline demo passed.")
+        print(f"macOS Python {PYTHON_VERSION}, {binaries} universal2 binaries, Codex setup, CLI and offline demo passed.")
 
 
 def verify_windows(archive: Path, embed: Path) -> None:
@@ -118,7 +129,8 @@ def verify_windows(archive: Path, embed: Path) -> None:
             pe = struct.unpack_from("<I", data, 0x3C)[0]
             require(data[:2] == b"MZ" and data[pe:pe + 6] == b"PE\0\0\x64\x86", f"Expected AMD64 PE: {name}.")
         for name in ("harness.cmd", "Start Harness.cmd", "launch.py", "harness/windows_process.py",
-                     "harness/windows_worker.py", "examples/research-briefing.json"):
+                     "harness/windows_worker.py", "harness/codex_setup.py", "codex-skill/personal-harness/SKILL.md",
+                     "examples/research-briefing.json"):
             require(prefix + name in bundle.namelist(), f"Missing Windows package file: {name}.")
         for name in bundle.namelist():
             if name.endswith(".py"):

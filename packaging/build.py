@@ -30,6 +30,7 @@ def stage_common(bundle: Path) -> None:
     shutil.copytree(PROJECT / "examples", bundle / "examples")
     shutil.copy2(PROJECT / "packaging" / "START-HERE.txt", bundle)
     shutil.copy2(PROJECT / "packaging" / "THIRD-PARTY-NOTICES.txt", bundle)
+    shutil.copytree(PROJECT / "packaging" / "codex-skill", bundle / "codex-skill")
 
 
 def archive_windows(bundle: Path, embed: Path, output: Path) -> None:
