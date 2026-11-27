@@ -1,0 +1,150 @@
+name: Verify Windows timeout and process cleanup for v0.1.0
+
+on:
+  push:
+    branches: [ci/verify-v0.1.0-windows-process]
+
+permissions: {}
+
+jobs:
+  process-cleanup:
+    name: Windows x64 packaged command
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - name: Check timeout and termination of the actual process tree
+        shell: python
+        run: |
+          import ctypes
+          import hashlib
+          import json
+          import os
+          import platform
+          import shutil
+          import subprocess
+          import tempfile
+          import time
+          import urllib.request
+          import zipfile
+          from ctypes import wintypes
+          from pathlib import Path
+
+          url = 'https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0-alpha.2/Personal-Harness-Windows-x64.zip'
+          expected_sha = '1e2230e49c10cea48fa90b5fab6c2bf88dcfd44d5e939f69f0fb0dd9e54433e2'
+          timeout_seconds = 8
+          wait_object = 0
+          wait_timeout = 0x102
+          synchronize = 0x00100000
+
+          def require(condition, message):
+              if not condition:
+                  raise RuntimeError(message)
+
+          require(platform.system() == 'Windows' and platform.machine().lower() == 'amd64', 'Expected Windows x64')
+          print(f'Runner: Windows {platform.release()} {platform.machine()}', flush=True)
+          kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+          kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+          kernel.OpenProcess.restype = wintypes.HANDLE
+          kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+          kernel.WaitForSingleObject.restype = wintypes.DWORD
+          kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+          kernel.CloseHandle.restype = wintypes.BOOL
+
+          tree_fixture = '''\
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          mode, *ancestors = sys.argv[1:]
+          chain = [*ancestors, str(os.getpid())]
+          if mode == 'grandchild':
+              stage = Path('processes.tmp')
+              stage.write_text(json.dumps([int(pid) for pid in chain]), encoding='utf-8')
+              stage.replace('processes.json')
+          else:
+              child = 'child' if mode == 'parent' else 'grandchild'
+              subprocess.Popen([sys.executable, '-B', __file__, child, *chain])
+          time.sleep(45)
+          '''
+
+          with tempfile.TemporaryDirectory(prefix='Harness Windows ', dir=os.environ['RUNNER_TEMP']) as directory:
+              root = Path(directory)
+              archive = root / 'Personal-Harness-Windows-x64.zip'
+              with urllib.request.urlopen(url, timeout=60) as response, archive.open('wb') as output:
+                  shutil.copyfileobj(response, output)
+              with archive.open('rb') as stream:
+                  require(hashlib.file_digest(stream, 'sha256').hexdigest() == expected_sha, 'Published ZIP checksum mismatch')
+              print(f'Verified Windows package SHA-256 {expected_sha}', flush=True)
+              with zipfile.ZipFile(archive) as package:
+                  package.extractall(root)
+              bundle = root / 'Personal Harness'
+              embedded_python = bundle / 'runtime/python.exe'
+              work = bundle / 'smoke-workspace'
+              work.mkdir()
+              fixture = work / 'process_tree.py'
+              fixture.write_text(tree_fixture, encoding='utf-8')
+              marker = work / 'processes.json'
+              cmd = Path(os.environ['SystemRoot']) / 'System32/cmd.exe'
+              cli = [cmd, '/d', '/c', 'harness.cmd']
+
+              def call(*args, expected=0):
+                  proc = subprocess.run([*cli, *args], cwd=bundle, capture_output=True, encoding='utf-8',
+                                        errors='replace', timeout=25)
+                  require(proc.returncode == expected,
+                          f'{args!r} exited {proc.returncode}, expected {expected}: {proc.stdout}\n{proc.stderr}')
+                  return proc.stdout
+
+              def start(name, argv):
+                  spec = work / f'{name}.json'
+                  spec.write_text(json.dumps({'version': 1, 'name': name, 'steps': [{
+                      'id': 'external_command', 'type': 'action', 'adapter': 'command',
+                      'config': {'argv': [str(embedded_python), '-B', *argv]},
+                      'timeout_seconds': timeout_seconds,
+                  }]}), encoding='utf-8')
+                  return json.loads(call('start', str(spec.relative_to(bundle)), '--workspace', 'smoke-workspace'))['run_id']
+
+              run_id = start('timeout', [str(fixture), 'parent'])
+              began = time.monotonic()
+              with subprocess.Popen([*cli, 'resume', run_id, '--allow-command'], cwd=bundle, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, encoding='utf-8', errors='replace') as process:
+                  handles = []
+                  try:
+                      while not marker.exists() and process.poll() is None and time.monotonic() - began < timeout_seconds:
+                          time.sleep(0.05)
+                      require(marker.exists(), 'The parent, child and grandchild did not all start')
+                      pids = json.loads(marker.read_text(encoding='utf-8'))
+                      require(len(set(pids)) == 3, f'Expected three distinct PIDs: {pids}')
+                      for label, pid in zip(('parent', 'child', 'grandchild'), pids):
+                          handle = kernel.OpenProcess(synchronize, False, pid)
+                          require(handle, f'OpenProcess failed for {label} PID {pid}: {ctypes.get_last_error()}')
+                          handles.append((label, pid, handle))
+                          require(kernel.WaitForSingleObject(handle, 0) == wait_timeout, f'{label} PID {pid} exited before timeout')
+                          print(f'{label} PID {pid} confirmed running before timeout', flush=True)
+                      out, err = process.communicate(timeout=25)
+                      elapsed = time.monotonic() - began
+                      require(process.returncode == 1, f'Expected timeout exit 1: {out}\n{err}')
+                      status = json.loads(out)
+                      require(status['status'] == 'failed' and status['steps'][0]['reason'] == 'timeout', f'Unexpected status: {status}')
+                      for label, pid, handle in handles:
+                          require(kernel.WaitForSingleObject(handle, 3000) == wait_object, f'{label} PID {pid} survived timeout')
+                          print(f'{label} PID {pid} confirmed exited after timeout', flush=True)
+                      print(f'Configured timeout {timeout_seconds}s produced reason=timeout after {elapsed:.2f}s', flush=True)
+                  finally:
+                      for _, _, handle in handles:
+                          kernel.CloseHandle(handle)
+                      if process.poll() is None:
+                          process.kill()
+
+              events = [json.loads(line) for line in call('events', run_id).splitlines()]
+              require(any(event['kind'] == 'attempt_failed' and event.get('reason') == 'timeout' for event in events),
+                      'The timeout event was not persisted')
+              success_id = start('after_cleanup', ['-c', "print('command completed after cleanup')"])
+              require(json.loads(call('resume', success_id, '--allow-command'))['status'] == 'succeeded',
+                      'A subsequent external command failed')
+              success = json.loads(call('status', success_id, '--outputs'))
+              require(success['steps'][0]['output']['stdout'].strip() == 'command completed after cleanup',
+                      f'Unexpected output: {success}')
+              print('Timeout persisted and a subsequent external command succeeded.', flush=True)
