@@ -139,7 +139,7 @@ jobs:
                           process.kill()
 
               events = [json.loads(line) for line in call('events', run_id).splitlines()]
-              require(any(event['kind'] == 'attempt_failed' and event.get('reason') == 'timeout' for event in events),
+              require(any(event['kind'] == 'attempt_failed' and event['details'].get('reason') == 'timeout' for event in events),
                       'The timeout event was not persisted')
               success_id = start('after_cleanup', ['-c', "print('command completed after cleanup')"])
               require(json.loads(call('resume', success_id, '--allow-command'))['status'] == 'succeeded',
