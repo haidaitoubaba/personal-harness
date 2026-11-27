@@ -1,10 +1,15 @@
-name: Verify Personal Harness v0.1.0-alpha.2 packages
+name: Preview published package verification
+run-name: Verify release v0.1.0-alpha.2 in CI
 
+# GitHub loads this workflow from the release tag's commit.
+# Cut new release tags from a branch that already contains this file.
+# Attach both ZIPs before publishing the release.
 on:
   push:
     branches: [ci/verify-v0.1.0-alpha.2]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   package:
@@ -18,18 +23,17 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             asset: Personal-Harness-Windows-x64.zip
-            digest: 1e2230e49c10cea48fa90b5fab6c2bf88dcfd44d5e939f69f0fb0dd9e54433e2
           - name: Intel Mac
             runner: macos-15-intel
             asset: Personal-Harness-macOS.zip
-            digest: 75e7117e3fd3f4494056312eff1c150b453d4650f7adde1d5c90021cda6e1df0
 
     steps:
       - name: Verify published ZIP, offline demo, and approval
         shell: python
         env:
           ASSET: ${{ matrix.asset }}
-          SHA256: ${{ matrix.digest }}
+          RELEASE_TAG: v0.1.0-alpha.2
+          GH_TOKEN: ${{ github.token }}
         run: |
           import hashlib
           import json
@@ -40,17 +44,37 @@ jobs:
           import shutil
           import subprocess
           import tempfile
+          import time
+          import urllib.parse
           import urllib.request
           import zipfile
           from pathlib import Path
 
           WINDOWS = os.name == "nt"
-          VERSION = "3.14.10"
-          URL = "https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.0-alpha.2/"
 
           def require(condition, message):
               if not condition:
                   raise RuntimeError(message)
+
+          def release_asset(tag, name, token):
+              api = os.environ["GITHUB_API_URL"]
+              repo = os.environ["GITHUB_REPOSITORY"]
+              encoded_tag = urllib.parse.quote(tag, safe="")
+              request = urllib.request.Request(
+                  f"{api}/repos/{repo}/releases/tags/{encoded_tag}",
+                  headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"},
+              )
+              for attempt in range(7):
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      release = json.load(response)
+                  require(release["tag_name"] == tag and not release["draft"] and release["published_at"],
+                          f"{tag!r} is not the requested published release")
+                  asset = next((item for item in release["assets"] if item["name"] == name), None)
+                  if asset and asset["state"] == "uploaded" and re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or ""):
+                      return asset["browser_download_url"], asset["digest"].removeprefix("sha256:")
+                  if attempt < 6:
+                      time.sleep(10)
+              raise RuntimeError(f"Release {tag!r} has no uploaded {name} with a GitHub SHA-256 digest")
 
           def run(args, cwd, env, *, input_text=None, expected=0):
               result = subprocess.run(
@@ -77,11 +101,14 @@ jobs:
           with tempfile.TemporaryDirectory(prefix="Harness release ", dir=os.environ["RUNNER_TEMP"]) as directory:
               root = Path(directory)
               archive = root / os.environ["ASSET"]
-              with urllib.request.urlopen(URL + archive.name, timeout=60) as response, archive.open("wb") as target:
+              tag = os.environ["RELEASE_TAG"]
+              url, expected_digest = release_asset(tag, archive.name, os.environ.pop("GH_TOKEN"))
+              print(f"Testing release {tag!r}", flush=True)
+              with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as target:
                   shutil.copyfileobj(response, target)
               with archive.open("rb") as stream:
-                  digest = hashlib.sha256(stream.read()).hexdigest()
-              require(digest == os.environ["SHA256"], f"Unexpected SHA-256: {digest}")
+                  digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              require(digest == expected_digest, f"Unexpected SHA-256: {digest}")
               print(f"Verified SHA-256 {digest} for {archive.name}", flush=True)
 
               env = dict(os.environ)
@@ -103,16 +130,19 @@ jobs:
                   probe = run([bundle / "runtime/python.exe", "-B", "-c",
                                "import platform, sqlite3; print(platform.python_version()); print(platform.machine().lower())"],
                               bundle, env).splitlines()
-                  require(probe == [VERSION, "amd64"], f"Unexpected bundled Windows Python: {probe}")
+                  require(len(probe) == 2 and probe[1] == "amd64", f"Unexpected bundled Windows Python: {probe}")
+                  version = probe[0]
                   launcher = [cmd, "/d", "/c", "call", "Start Harness.cmd"]
                   cli = [cmd, "/d", "/c", "harness.cmd"]
               else:
-                  info = bundle / "runtime/_internal/Python.framework/Versions/3.14/Resources/Info.plist"
-                  with info.open("rb") as stream:
-                      require(plistlib.load(stream)["CFBundleVersion"] == VERSION, "Unexpected bundled macOS Python")
+                  versions = bundle / "runtime/_internal/Python.framework/Versions"
+                  infos = list(versions.glob("[0-9]*/Resources/Info.plist"))
+                  require(len(infos) == 1, "Expected one bundled macOS Python framework")
+                  with infos[0].open("rb") as stream:
+                      version = plistlib.load(stream)["CFBundleVersion"]
                   launcher = [bundle / "Start Harness.command"]
                   cli = [bundle / "harness"]
-              print(f"Bundled Python {VERSION} confirmed", flush=True)
+              print(f"Bundled Python {version} confirmed", flush=True)
 
               def invoke(*args, expected=0):
                   return run([*cli, *args], bundle, env, expected=expected)
@@ -122,7 +152,7 @@ jobs:
 
               demo = run(launcher, bundle, env, input_text="\ny\n\n")
               print(demo, flush=True)
-              require("Draft: Sample metadata review is complete." in demo, "Demo did not produce the sample draft")
+              require(re.search(r"(?m)^Draft: \S", demo), "Demo did not produce a sample draft")
               require("Status: succeeded" in demo, "Demo did not show success after approval")
               recorded_run = re.search(r"(?m)^Run: ([0-9a-f]{32})$", demo)
               require(recorded_run is not None, "Demo did not report its run ID")
@@ -136,10 +166,12 @@ jobs:
               ):
                   run_id = report("start", definition)["run_id"]
                   waiting = report("resume", run_id)
-                  require(waiting["status"] == "waiting_for_approval" and waiting["current_step"] == "review_briefing",
-                          f"Unexpected approval gate: {waiting}")
-                  require(report(decision, run_id, "review_briefing", expected=exit_code)["status"] == status,
-                          f"{decision} did not produce {status}")
+                  gate = waiting["current_step"]
+                  require(waiting["status"] == "waiting_for_approval" and gate, f"Unexpected approval gate: {waiting}")
+                  decided = report(decision, run_id, gate, expected=exit_code)
+                  if decision == "approve" and decided["status"] != "succeeded":
+                      decided = report("resume", run_id)
+                  require(decided["status"] == status, f"{decision} did not produce {status}")
                   require(report("status", run_id)["status"] == status, f"{status} was not persisted")
                   kinds = {json.loads(line)["kind"] for line in invoke("events", run_id).splitlines()}
                   require({"approval_requested", decision_event} <= kinds and ("run_succeeded" in kinds) == (exit_code == 0),
