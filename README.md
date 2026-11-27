@@ -113,3 +113,16 @@ python3.14 -m harness status "$RUN_ID" --outputs
 ```
 
 Each successful build writes both ZIPs to a fresh `personal-harness-*` directory. The run records source tests, SHA-256 digests, the packaged macOS demo and CLI checks, and Windows runtime and ZIP verification. Run `Start Harness.cmd` from an extracted ZIP on native Windows to complete the Windows execution check.
+
+## Verify published packages
+
+For the next packaged release, create a new `release/<version>` branch from `release/v0.1.0-alpha.2`, the current packaging baseline. Tag the prepared release commit on the new branch. For later versions, start from the most recent release branch with the packaging files and keep `.github/workflows/verify-published-packages.yml` in the tagged commit.
+
+Attach `Personal-Harness-macOS.zip` and `Personal-Harness-Windows-x64.zip` to the GitHub Release, then publish it. Publishing a release or prerelease starts the checks for that tag. The Windows x64 and Intel Mac jobs download the published ZIPs, verify their SHA-256 digests, run the offline demo, and check that CLI approval and rejection results are saved and can be read back.
+
+### Recheck a published version
+
+1. In **Actions**, open [Verify published packages](https://github.com/haidaitoubaba/personal-harness/actions/workflows/verify-published-packages.yml).
+2. Select **Run workflow** and leave **Use workflow from** set to `main`.
+3. Enter the exact published tag in **Tag of an existing published release**, for example `v0.1.0-alpha.2`, and select **Run workflow**.
+4. Open the new run and check the results for **Windows x64** and **Intel Mac**.
