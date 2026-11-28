@@ -10,8 +10,10 @@ from .workflow import json_text
 
 
 SKILL_NAME = "personal-harness"
-# The previously distributed standalone Personal Harness Skill.
-PREVIOUS_SKILL_SHA256 = "ac3192f78aa843aa8d56eb08f2e01b4d6afd7e9995fd57ecab8d46a8bf94ed18"
+PREVIOUS_SKILL_SHA256 = {
+    "ac3192f78aa843aa8d56eb08f2e01b4d6afd7e9995fd57ecab8d46a8bf94ed18",  # Standalone
+    "7f6d1668a608d3155d7fbccccb302de4d47ca4180ab8db497bcfeca94fd6ad83",  # v0.1.1
+}
 
 
 def user_skill_directory() -> Path:
@@ -59,7 +61,7 @@ def install_codex_skill(bundle: Path, skills_dir: Path) -> Path:
             raise ValueError(f"An existing folder is using the Personal Harness skill name: {target}")
         installed = destination.read_text(encoding="utf-8")
         if installed != bundled_skill:
-            if hashlib.sha256(installed.encode("utf-8")).hexdigest() != PREVIOUS_SKILL_SHA256:
+            if hashlib.sha256(installed.encode("utf-8")).hexdigest() not in PREVIOUS_SKILL_SHA256:
                 raise ValueError(f"A different Personal Harness skill is already installed: {target}")
         write_binding(binding, bundle)
         if installed != bundled_skill:

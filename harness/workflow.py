@@ -178,7 +178,9 @@ def validate_output(output: Any, checks: JsonObject) -> str:
     return serialized
 
 
-def parse_workflow(text: str, adapters: Mapping[str, Adapter]) -> Workflow:
+def parse_workflow(
+    text: str, adapters: Mapping[str, Adapter], *, allow_unknown_adapters: bool = False,
+) -> Workflow:
     raw = object_with(load_json(text), "workflow", {"version", "name", "steps"})
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise WorkflowError("workflow.version must be 1")
@@ -215,12 +217,14 @@ def parse_workflow(text: str, adapters: Mapping[str, Adapter]) -> Workflow:
             continue
 
         adapter = step["adapter"]
-        if type(adapter) is not str or adapter not in adapters:
+        if type(adapter) is not str or (adapter not in adapters and not allow_unknown_adapters):
             raise WorkflowError(f"{location}.adapter is unknown")
+        nonempty_text(adapter, f"{location}.adapter")
         config = step["config"]
         if type(config) is not dict:
             raise WorkflowError(f"{location}.config must be an object")
-        adapters[adapter].check(config, f"{location}.config")
+        if adapter in adapters:
+            adapters[adapter].check(config, f"{location}.config")
 
         attempts = step.get("max_attempts", 1)
         if type(attempts) is not int or not 1 <= attempts <= 5:

@@ -108,7 +108,60 @@ def verify_macos(archive: Path) -> None:
         require(invoke("resume", run_id, "--allow-command")["status"] == "succeeded", "Packaged command failed.")
         result = invoke("status", run_id, "--outputs")
         require(result["steps"][0]["output"]["stdout"] == "works\n", "Packaged command output differed.")
+        verify_packaged_backup(bundle)
         print(f"macOS Python {PYTHON_VERSION}, {binaries} universal2 binaries, Codex setup, CLI and offline demo passed.")
+
+
+def verify_packaged_backup(bundle: Path) -> None:
+    bundle = bundle.resolve()
+    launcher = (
+        [Path(os.environ["SystemRoot"]) / "System32/cmd.exe", "/d", "/c", "harness.cmd"]
+        if os.name == "nt" else [bundle / "harness"]
+    )
+    example = Path("examples/research-briefing.json")
+
+    with tempfile.TemporaryDirectory(prefix="Harness migration ") as folder:
+        root = Path(folder).resolve()
+        original = root / "original.sqlite3"
+        moved_workspace = root / "moved workspace"
+        moved_workspace.mkdir()
+        saved = root / "backup.zip"
+        shared = root / "workflows.zip"
+        restored = root / "restored"
+
+        def report(*args: str | Path, db: Path = original) -> dict:
+            result = subprocess.check_output(
+                [*launcher, "--db", db, *args], cwd=bundle, text=True, encoding="utf-8", timeout=60,
+            )
+            return json.loads(result)
+
+        run = report("start", example, "--workspace", bundle)["run_id"]
+        pending = report("resume", run)
+        require(pending["status"] == "waiting_for_approval", "Packaged workflow did not pause for review.")
+
+        report("backup", saved, "--workflow", example)
+        preview = report("inspect-backup", saved)
+        require(preview["includes_state"] and preview["runs"][0]["run_id"] == run, "Backup lost the run ID.")
+
+        result = report("restore", saved, restored, "--map-workspace", bundle, moved_workspace)
+        db = Path(result["database"])
+        require(not result["unavailable_workspaces"], "Backup did not restore the workspace mapping.")
+        require(report("status", run, db=db)["status"] == pending["status"], "Restore lost the pending approval.")
+        require(
+            report("approve", run, "review_briefing", db=db)["status"] == "succeeded",
+            "Restored workflow did not complete after approval.",
+        )
+        require(report("status", run)["status"] == pending["status"], "Approving a restored run changed the original.")
+
+        report("export-workflows", shared, "--workflow", example)
+        preview = report("inspect-backup", shared)
+        require(not preview["includes_state"] and not preview["runs"], "Workflow-only export included run data.")
+        received = root / "received"
+        result = report("restore", shared, received)
+        require(result["database"] is None, "Workflow-only restore created a database.")
+        definition = received / result["workflows"][0]["path"]
+        require(report("validate", definition)["valid"], "The exported workflow did not validate.")
+    print("Packaged backup, workspace remapping, restored approval, and workflow export passed.")
 
 
 def verify_windows(archive: Path, embed: Path) -> None:
@@ -129,7 +182,8 @@ def verify_windows(archive: Path, embed: Path) -> None:
             pe = struct.unpack_from("<I", data, 0x3C)[0]
             require(data[:2] == b"MZ" and data[pe:pe + 6] == b"PE\0\0\x64\x86", f"Expected AMD64 PE: {name}.")
         for name in ("harness.cmd", "Start Harness.cmd", "launch.py", "harness/windows_process.py",
-                     "harness/windows_worker.py", "harness/codex_setup.py", "codex-skill/personal-harness/SKILL.md",
+                     "harness/windows_worker.py", "harness/codex_setup.py", "harness/backup.py",
+                     "codex-skill/personal-harness/SKILL.md",
                      "examples/research-briefing.json"):
             require(prefix + name in bundle.namelist(), f"Missing Windows package file: {name}.")
         for name in bundle.namelist():

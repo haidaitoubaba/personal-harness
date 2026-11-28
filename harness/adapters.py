@@ -117,8 +117,9 @@ class CommandAdapter:
 
 
 class CodexAdapter:
-    def __init__(self, executable: str | Sequence[str] = "codex"):
+    def __init__(self, executable: str | Sequence[str] = "codex", *, model: str | None = None):
         self.command = [executable] if isinstance(executable, str) else list(executable)
+        self.model = None if model is None else nonempty_text(model, "Codex model")
 
     def check(self, config: JsonObject, location: str) -> None:
         object_with(config, location, {"prompt"})
@@ -134,9 +135,10 @@ class CodexAdapter:
         with tempfile.TemporaryDirectory(prefix="harness-codex-") as directory:
             root = Path(directory).resolve()
             final_message = root / "final.json"
+            model_args = [] if self.model is None else [f"--model={self.model}"]
             run_process(
                 [
-                    *self.command, "exec", "--ignore-user-config", "--ephemeral",
+                    *self.command, "exec", *model_args, "--ignore-user-config", "--ephemeral",
                     "--skip-git-repo-check", "--sandbox", "read-only",
                     "--disable", "apps", "--disable", "plugins", "--disable", "hooks",
                     "--disable", "browser_use", "--disable", "computer_use",
@@ -158,5 +160,5 @@ class CodexAdapter:
         return result
 
 
-def built_in_adapters() -> dict[str, Adapter]:
-    return {"mock": MockAdapter(), "command": CommandAdapter(), "codex": CodexAdapter()}
+def built_in_adapters(*, codex_model: str | None = None) -> dict[str, Adapter]:
+    return {"mock": MockAdapter(), "command": CommandAdapter(), "codex": CodexAdapter(model=codex_model)}

@@ -1,6 +1,6 @@
 ---
 name: personal-harness
-description: Set up or use the packaged Personal Harness (通用 Harness) in Codex for offline demos, local workflows, research briefings, and approval or recovery of saved runs.
+description: Set up or use the packaged Personal Harness (通用 Harness) in Codex to run, approve, recover, back up, restore, or share local workflows, including when changing computers or AI accounts.
 ---
 
 # Personal Harness
@@ -20,3 +20,10 @@ Call the launcher by its full, quoted path. In PowerShell use `&` before a quote
 - For approval, read `status RUN_ID --outputs` and show the result. Record the user's decision with `approve RUN_ID GATE_ID` or `reject RUN_ID GATE_ID`. Resume after approval if there are more steps.
 - For an interrupted action, inspect `status` and `events` before asking whether to replay it. Use `recover RUN_ID STEP_ID retry` or `recover RUN_ID STEP_ID fail` for the user's decision.
 - Report the run ID, absolute database path, and current status. Include the gate or step ID when it is needed to continue in another chat.
+
+## Move or share workflows
+
+- Use `--db PROJECT_DB backup PRIVATE_ZIP` to snapshot the correct project's state. Use repeated `--workflow DEFINITION` flags for any editable definitions the user wants included.
+- Use `export-workflows SHARE_ZIP --workflow DEFINITION` for the files the user wants to share. Review the selected workflow for private prompts, inputs, paths, or hardcoded credentials before sharing.
+- Run `inspect-backup ZIP` to check the bundle and report the run IDs, workspaces, and adapters. Use `restore ZIP NEW_FOLDER` and add `--map-workspace OLD_PATH NEW_PATH` when a saved workspace has moved. Use the reported database path for later run commands.
+- Set up tools and account connections on the receiving machine as needed. To use a different model for an authorized Codex action, add `--codex-model MODEL` with `--allow-codex` on `resume`.

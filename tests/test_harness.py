@@ -1,12 +1,17 @@
+import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+import zipfile
+from contextlib import closing
 from pathlib import Path
 
 from harness.adapters import built_in_adapters
+from harness.backup import MANIFEST, STATE
 from harness.store import Store
 from harness.workflow import ActionError, WorkflowError, parse_workflow, validate_output
 
@@ -67,9 +72,9 @@ class HarnessCLITests(unittest.TestCase):
         self.folder = Path(folder.name)
         self.db = self.folder / "run state.sqlite3"
 
-    def cli(self, *args, code=0):
+    def cli(self, *args, code=0, db=None):
         process = subprocess.run(
-            [sys.executable, "-m", "harness", "--db", str(self.db), *map(str, args)],
+            [sys.executable, "-m", "harness", "--db", str(db or self.db), *map(str, args)],
             cwd=ROOT, capture_output=True, text=True, timeout=10, check=False,
         )
         self.assertEqual(process.returncode, code, process.stderr + process.stdout)
@@ -266,6 +271,7 @@ from pathlib import Path
 
 args = sys.argv[1:]
 assert args[0] == "exec"
+assert "--model=test-model" in args
 for flag in ("--ignore-user-config", "--ephemeral", "--skip-git-repo-check"):
     assert flag in args
 assert args[args.index("--sandbox") + 1] == "read-only"
@@ -287,20 +293,21 @@ target.write_text(json.dumps({
         )
         run = self.begin(CODEX)
         self.assertIn("--allow-codex", self.cli("resume", run, code=2))
+        self.assertIn("--allow-codex", self.cli("resume", run, "--codex-model", "test-model", code=2))
         self.assertEqual(self.cli("status", run)["steps"][1]["attempts"], 0)
         script = """
 import sys
 from harness import __main__ as cli
 from harness.adapters import CodexAdapter, built_in_adapters
 
-cli.built_in_adapters = lambda: built_in_adapters() | {
-    "codex": CodexAdapter([sys.executable, sys.argv[1]])
+cli.built_in_adapters = lambda *, codex_model=None: built_in_adapters() | {
+    "codex": CodexAdapter([sys.executable, sys.argv[1]], model=codex_model)
 }
 raise SystemExit(cli.main(sys.argv[2:]))
 """
         result = subprocess.run(
             [sys.executable, "-c", script, str(fake), "--db", str(self.db),
-             "resume", run, "--allow-codex"],
+             "resume", run, "--allow-codex", "--codex-model", "test-model"],
             cwd=ROOT, capture_output=True, text=True, timeout=10, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -317,6 +324,113 @@ raise SystemExit(cli.main(sys.argv[2:]))
         path = self.definition(mock_action(max_attempts=0))
         self.cli("start", path, code=2)
         self.assertFalse(self.db.exists())
+
+    def test_backup_restores_committed_wal_state_and_run_continues_after_move(self):
+        previous = self.folder / "old workspace"
+        previous.mkdir()
+        replacement = self.folder / "new workspace"
+        replacement.mkdir()
+        definition = self.definition(
+            mock_action(config={"outcomes": [{"output": {"draft": "private research"}}]}),
+            {"id": "review", "type": "approval", "message": "Review the draft."},
+            mock_action(
+                id="where", adapter="command", from_steps=["demo"],
+                config={"argv": [sys.executable, "-c", "from pathlib import Path; print(Path.cwd().name)"]},
+            ),
+        )
+        # Leave a connection open so the committed data stays in the WAL.
+        with closing(sqlite3.connect(self.db, isolation_level=None)) as wal:
+            self.assertEqual(wal.execute("PRAGMA journal_mode=WAL").fetchone(), ("wal",))
+            wal.execute("BEGIN")
+            wal.execute("SELECT name FROM sqlite_schema").fetchall()
+            run = self.cli("start", definition, "--workspace", previous)["run_id"]
+            self.assertEqual(self.cli("resume", run)["status"], "waiting_for_approval")
+            initial = self.cli("status", run, "--outputs")
+            events = self.cli("events", run)
+            archive = self.folder / "private.zip"
+            created = self.cli("backup", archive, "--workflow", definition)
+
+        preview = self.cli("inspect-backup", archive)
+        self.assertTrue(preview["includes_state"])
+        self.assertEqual(preview["runs"][0]["run_id"], run)
+        self.assertEqual(preview["required_adapters"], ["command", "mock"])
+        previous.rmdir()
+        unmapped = self.cli("restore", archive, self.folder / "unmapped")
+        self.assertEqual(unmapped["unavailable_workspaces"], [str(previous.resolve())])
+        before = self.folder / "cannot restore"
+        self.assertIn("No run", self.cli("restore", archive, before, "--map-workspace", "typo", replacement, code=2))
+        self.assertFalse(before.exists())
+
+        target = self.folder / "restored"
+        restored = self.cli("restore", archive, target, "--map-workspace", previous.resolve(), replacement)
+        db = Path(restored["database"])
+        self.assertEqual(restored["unavailable_workspaces"], [])
+        self.assertEqual(db, target / STATE)
+        self.assertEqual((target / created["workflows"][0]["path"]).read_bytes(), definition.read_bytes())
+        self.assertEqual(self.cli("status", run, "--outputs", db=db), initial)
+        self.assertEqual(self.cli("events", run, db=db), events)
+        self.assertEqual(self.cli("resume", run, db=db)["status"], "waiting_for_approval")
+        self.cli("approve", run, "review", db=db)
+        self.assertIn("--allow-command", self.cli("resume", run, db=db, code=2))
+        self.assertEqual(self.cli("resume", run, "--allow-command", db=db)["status"], "succeeded")
+        resumed = self.cli("status", run, "--outputs", db=db)
+        self.assertEqual(resumed["steps"][0]["attempts"], 1)
+        self.assertEqual(resumed["steps"][2]["output"]["stdout"].strip(), replacement.name)
+        self.assertEqual(self.cli("status", run, "--outputs"), initial)
+
+    def test_workflow_export_excludes_state_and_lists_custom_adapter_dependencies(self):
+        run = self.begin(self.definition(mock_action(config={"outcomes": [{"output": {"key": "private output"}}]})))
+        self.cli("resume", run)
+        custom = self.folder / "other workflow.json"
+        custom.write_text(json.dumps({
+            "version": 1, "name": "Other platform", "steps": [mock_action(adapter="other-platform", config={})],
+        }), encoding="utf-8")
+        archive = self.folder / "share.zip"
+        report = self.cli("export-workflows", archive, "--workflow", RESEARCH, "--workflow", custom)
+        self.assertEqual(report["runs"], [])
+        self.assertEqual(report["required_adapters"], ["mock", "other-platform"])
+        with zipfile.ZipFile(archive) as bundle:
+            self.assertEqual(set(bundle.namelist()), {MANIFEST, *(item["path"] for item in report["workflows"])})
+            self.assertTrue(all(b"private output" not in bundle.read(name) for name in bundle.namelist()))
+        target = self.folder / "received"
+        restored = self.cli("restore", archive, target)
+        self.assertIsNone(restored["database"])
+        definition = target / restored["workflows"][0]["path"]
+        db = target / STATE
+        self.assertFalse(db.exists())
+        new_run = self.cli("start", definition, "--workspace", target, db=db)["run_id"]
+        self.assertNotEqual(new_run, run)
+        self.assertEqual(self.cli("resume", new_run, db=db)["status"], "waiting_for_approval")
+
+    def test_restore_refuses_corrupt_unsafe_and_existing_destinations(self):
+        archive = self.folder / "archive.zip"
+        report = self.cli("export-workflows", archive, "--workflow", RESEARCH)
+        original = archive.read_bytes()
+        self.assertIn("already exists", self.cli("export-workflows", archive, "--workflow", RESEARCH, code=2))
+        self.assertEqual(archive.read_bytes(), original)
+        target = self.folder / "existing"
+        target.mkdir()
+        self.assertIn("already exists", self.cli("restore", archive, target, code=2))
+        self.assertEqual(list(target.iterdir()), [])
+
+        with zipfile.ZipFile(archive) as bundle:
+            manifest = json.loads(bundle.read(MANIFEST))
+        name = report["workflows"][0]["path"]
+        target = self.folder / "invalid"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr(MANIFEST, json.dumps(manifest))
+            bundle.writestr(name, RESEARCH.read_bytes() + b" ")
+        self.assertIn("checksum failed", self.cli("restore", archive, target, code=2))
+        self.assertFalse(target.exists())
+
+        payload = RESEARCH.read_bytes()
+        manifest["files"] = {"../escaped.json": hashlib.sha256(payload).hexdigest()}
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr(MANIFEST, json.dumps(manifest))
+            bundle.writestr("../escaped.json", payload)
+        self.assertIn("invalid file path", self.cli("restore", archive, target, code=2))
+        self.assertFalse(target.exists())
+        self.assertFalse((self.folder / "escaped.json").exists())
 
 
 if __name__ == "__main__":

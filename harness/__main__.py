@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .adapters import built_in_adapters
+from .backup import create_bundle, inspect_bundle, restore_bundle
 from .runner import Runner
 from .store import Store
 from .workflow import WorkflowError, json_text, parse_workflow
@@ -24,6 +25,7 @@ def parser() -> argparse.ArgumentParser:
     resume.add_argument("run_id")
     resume.add_argument("--allow-command", action="store_true", help="Run trusted local commands")
     resume.add_argument("--allow-codex", action="store_true", help="Send selected data to Codex")
+    resume.add_argument("--codex-model", help="Use this Codex model for the current invocation")
     status = commands.add_parser("status", help="Inspect the current state")
     status.add_argument("run_id")
     status.add_argument("--outputs", action="store_true", help="Show persisted step outputs")
@@ -35,13 +37,46 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("step_id")
         if name == "recover":
             command.add_argument("decision", choices=("retry", "fail"))
+    for name, help_text in (
+        ("backup", "Create a private state backup with optional workflow files"),
+        ("export-workflows", "Package selected workflow files for sharing"),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("archive", type=Path)
+        command.add_argument(
+            "--workflow", type=Path, action="append", default=[], required=name == "export-workflows",
+            help="Include this workflow JSON file (repeat to include multiple files)",
+        )
+    inspect = commands.add_parser("inspect-backup", help="Verify a bundle and preview its contents")
+    inspect.add_argument("archive", type=Path)
+    restore = commands.add_parser("restore", help="Verify and restore a bundle into a new folder")
+    restore.add_argument("archive", type=Path)
+    restore.add_argument("destination", type=Path)
+    restore.add_argument(
+        "--map-workspace", nargs=2, action="append", default=[], metavar=("OLD_PATH", "NEW_PATH"),
+        help="Update saved runs to use an existing local workspace (repeat for multiple paths)",
+    )
     return cli
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    adapters = built_in_adapters()
     try:
+        model = getattr(args, "codex_model", None)
+        if model is not None and not args.allow_codex:
+            raise WorkflowError("--codex-model requires --allow-codex")
+        adapters = built_in_adapters(codex_model=model)
+        if args.command in {"backup", "export-workflows"}:
+            database = args.db if args.command == "backup" else None
+            print(json_text(create_bundle(args.archive, args.workflow, adapters, database=database)))
+            return 0
+        if args.command == "inspect-backup":
+            print(json_text(inspect_bundle(args.archive, adapters)))
+            return 0
+        if args.command == "restore":
+            mappings = [(old, Path(new)) for old, new in args.map_workspace]
+            print(json_text(restore_bundle(args.archive, args.destination, adapters, workspace_mappings=mappings)))
+            return 0
         if args.command in {"validate", "start"}:
             workflow = parse_workflow(args.definition.read_text(encoding="utf-8"), adapters)
             if args.command == "validate":

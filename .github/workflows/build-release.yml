@@ -1,0 +1,141 @@
+name: Build Personal Harness release
+run-name: Build ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [release/v0.1.2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-harness-v0.1.2
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Build and test macOS universal2
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install the official universal2 Python
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/python.pkg" \
+            https://www.python.org/ftp/python/3.14.10/python-3.14.10-macos11.pkg
+          printf '%s  %s\n' 286c7018aa2730f6747ca433dccdc2b31be45f078a9ea0ffa44d5f06368fd2d7 "$RUNNER_TEMP/python.pkg" | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/python.pkg" -target /
+          /Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14 -m venv "$RUNNER_TEMP/harness-build"
+          echo "$RUNNER_TEMP/harness-build/bin" >> "$GITHUB_PATH"
+      - name: Test source, build and test the package
+        run: |
+          python -m pip install PyInstaller==6.22.3
+          python packaging/check_packages.py test
+          python packaging/build.py macos --output-dir dist
+          PYTHONPATH=packaging python -c 'from pathlib import Path; from check_packages import verify_macos; verify_macos(Path("dist/Personal-Harness-macOS.zip"))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: dist/Personal-Harness-macOS.zip
+          if-no-files-found: error
+
+  intel:
+    name: Test the same package on Intel Mac
+    needs: macos
+    runs-on: macos-15-intel
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-package
+          path: dist
+      - name: Test the package
+        run: |
+          PYTHONPATH=packaging python3 -c 'from pathlib import Path; from check_packages import verify_macos; verify_macos(Path("dist/Personal-Harness-macOS.zip"))'
+
+  windows:
+    name: Build and test Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and test the package
+        shell: pwsh
+        run: |
+          $embed = Join-Path $env:RUNNER_TEMP "python-3.14.10-embed-amd64.zip"
+          curl.exe --fail --silent --show-error --location --retry 3 --output $embed https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python packaging/build.py windows --output-dir dist --python-embed $embed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:HARNESS_WINDOWS_RUNTIME = $embed
+          $env:PYTHONPATH = "packaging"
+          @'
+          import os
+          import tempfile
+          import zipfile
+          from pathlib import Path
+
+          from check_packages import BUNDLE_NAME, verify_packaged_backup, verify_windows
+
+          archive = Path("dist/Personal-Harness-Windows-x64.zip")
+          verify_windows(archive, Path(os.environ["HARNESS_WINDOWS_RUNTIME"]))
+          with tempfile.TemporaryDirectory(prefix="Harness package check ") as folder:
+              with zipfile.ZipFile(archive) as bundle:
+                  bundle.extractall(folder)
+              verify_packaged_backup(Path(folder) / BUNDLE_NAME)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: dist/Personal-Harness-Windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish the verified bundles
+    needs: [macos, intel, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-package"
+          path: dist
+          merge-multiple: true
+      - name: Publish the release at the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum Personal-Harness-macOS.zip Personal-Harness-Windows-x64.zip > SHA256SUMS.txt
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          ## Back up, restore, and share workflows
+
+          - Back up your Harness runs, outputs, approvals, and selected workflows. Inspect the bundle before restoring it to a new location and optionally remap workspace paths.
+          - Export selected workflow definitions in a separate ZIP for colleagues. Workflow exports contain no run database.
+          - Override the model for pending Codex steps when resuming a restored run.
+
+          ## Downloads
+
+          - **macOS (Apple silicon and Intel)** — `Personal-Harness-macOS.zip`
+          - **Windows x64** — `Personal-Harness-Windows-x64.zip`
+
+          Both ZIPs include Python 3.14.10 and the Codex Skill. Extract the ZIP and open `START-HERE.txt`. To move an existing installation, follow the backup and restore steps in the [v0.1.2 README](https://github.com/haidaitoubaba/personal-harness/blob/v0.1.2/README.md#back-up-restore-and-share-workflows).
+          NOTES
+          gh release create v0.1.2 \
+            Personal-Harness-macOS.zip Personal-Harness-Windows-x64.zip SHA256SUMS.txt \
+            --target "$GITHUB_SHA" --title "Personal Harness v0.1.2" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" --latest

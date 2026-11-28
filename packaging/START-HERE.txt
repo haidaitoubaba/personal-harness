@@ -43,6 +43,20 @@ Use the run ID printed by "start". Run future commands from the same directory
 or pass the same --db path before the command. Use "HARNESS --help" for the
 command list. Your local .harness database stores definitions and outputs.
 
+Back up, restore, and share
+
+  HARNESS --db PROJECT_DB backup personal.zip --workflow EXAMPLE
+  HARNESS inspect-backup personal.zip
+  HARNESS restore personal.zip MIGRATED --map-workspace OLD_PATH NEW_PATH
+  HARNESS export-workflows shared.zip --workflow EXAMPLE
+  HARNESS restore shared.zip RECEIVED
+
+Restore to a new folder. For a state backup, use the restored database path
+and the original run IDs to continue. Take a private backup for yourself.
+Use a workflow export for sharing and review the selected JSON for private
+content. Set up the required tools, project files, and account connections on
+the destination separately.
+
 Workflow examples
 
 - research-briefing.json runs offline with sample data.

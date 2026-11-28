@@ -4,11 +4,11 @@ A local Python runner for workflows that need retries, durable progress, and a h
 
 ## Use the packaged release
 
-Each v0.1.1 ZIP includes Personal Harness, Python 3.14.10, and the Codex Skill. [v0.1.1 release notes](https://github.com/haidaitoubaba/personal-harness/releases/tag/v0.1.1)
+Each v0.1.2 ZIP includes Personal Harness, Python 3.14.10, the Codex Skill, and tools to back up and restore runs or share workflow definitions. [v0.1.2 release notes](https://github.com/haidaitoubaba/personal-harness/releases/tag/v0.1.2)
 
 ### Download and set up in Codex
 
-1. Download one ZIP for your computer. [macOS for Apple silicon and Intel](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.1/Personal-Harness-macOS.zip) or [Windows x64](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.1/Personal-Harness-Windows-x64.zip).
+1. Download one ZIP for your computer. [macOS for Apple silicon and Intel](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.2/Personal-Harness-macOS.zip) or [Windows x64](https://github.com/haidaitoubaba/personal-harness/releases/download/v0.1.2/Personal-Harness-Windows-x64.zip).
 2. Extract the whole ZIP and open the resulting `Personal Harness` folder in Codex.
 3. Say:
 
@@ -75,6 +75,37 @@ python3 -m harness events "$RUN_ID"
 This example uses sample notes and deliberately retries the first collection step once. `resume` stops at `review_briefing`. The approval is the last step, so approving it completes the run. Use `reject "$RUN_ID" review_briefing` in place of `approve` to end it as rejected.
 
 The default database is `.harness/state.sqlite3` in the working directory. Put `--db /path/to/state.sqlite3` before a subcommand to use a specific database. Pass the same database on subsequent calls. `start` snapshots the definition and resolves the workspace path. A later `resume` uses the saved definition, even if the original file has moved. Files in the command workspace can still change between runs.
+
+## Back up, restore, and share workflows
+
+The v0.1.2 packages support these commands. Replace `python3 -m harness` with `./harness` on macOS or `.\harness.cmd` in Windows PowerShell when running from the extracted folder.
+
+### Move your Harness to another computer or account
+
+```sh
+python3 -m harness --db /old/project/.harness/state.sqlite3 backup personal.zip --workflow examples/research-briefing.json
+python3 -m harness inspect-backup personal.zip
+python3 -m harness restore personal.zip migrated --map-workspace /old/project /new/project
+python3 -m harness --db migrated/.harness/state.sqlite3 status RUN_ID --outputs
+```
+
+`backup` takes a consistent snapshot of one SQLite database, including run IDs, workflow snapshots, outputs, attempts, approvals, and events. Repeat `--workflow` to also keep editable copies of selected definitions. Keep this ZIP private. It is unencrypted and can contain sensitive content saved by your workflows.
+
+Use `inspect-backup` to verify the bundle's checksums and view the run IDs, saved workspaces, and required adapters. Restore into a new directory under an existing parent. The original database stays in place. Use the restored database path for subsequent `status`, `approve`, `recover`, and `resume` commands. If a path changed, pass the exact old path from the preview and an existing destination workspace. Repeat `--map-workspace` for additional paths. The restore reports saved paths that are still unavailable. Stop advancing the original run before switching to the restored copy.
+
+Install or sign in to the required tools on the destination. Run `setup-codex` there if you use the bundled Codex integration. The bundle covers Harness state and selected JSON files. Transfer project repositories and inputs separately, and reauthorize account connections on the new platform. ChatGPT chats, platform settings, credentials, installed plugins, and the contents of the saved workspaces are outside the bundle.
+
+You can invoke the Harness CLI from a different AI client with terminal access. Changing the AI provider that **executes a step** requires an appropriate adapter or an updated workflow for a new run. The preview lists adapter IDs so you can check compatibility before continuing. To use a different model for pending Codex steps, run `resume RUN_ID --allow-codex --codex-model MODEL` against the restored database. This setting applies to the current invocation and preserves the run's saved workflow and completed outputs.
+
+### Send a workflow to a colleague
+
+```sh
+python3 -m harness export-workflows team-workflows.zip --workflow examples/research-briefing.json
+python3 -m harness inspect-backup team-workflows.zip
+python3 -m harness restore team-workflows.zip shared
+```
+
+The export includes only the selected workflow definitions and their manifest. Review the JSON for embedded inputs, prompts, paths, and credentials before sharing. The recipient can review the adapter list, restore the files under `shared/workflows/`, and use `validate` and `start` with their own workspace. Restoring a bundle verifies files and does not execute workflow steps.
 
 ## Run a software CI check
 
